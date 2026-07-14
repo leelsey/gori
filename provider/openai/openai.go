@@ -99,6 +99,7 @@ type apiRequest struct {
 	Model               string         `json:"model"`
 	Messages            []apiMessage   `json:"messages"`
 	Tools               []apiTool      `json:"tools,omitempty"`
+	ToolChoice          any            `json:"tool_choice,omitempty"`
 	MaxCompletionTokens int            `json:"max_completion_tokens,omitempty"`
 	Temperature         *float64       `json:"temperature,omitempty"`
 	ReasoningEffort     string         `json:"reasoning_effort,omitempty"`
@@ -273,6 +274,9 @@ func (c *Client) buildRequest(req gori.Request, stream bool) apiRequest {
 		out.Tools = append(out.Tools, apiTool{Type: "function", Function: apiFunc{
 			Name: t.Name, Description: t.Description, Parameters: t.Schema,
 		}})
+	}
+	if req.ToolChoice != "" {
+		out.ToolChoice = map[string]any{"type": "function", "function": map[string]any{"name": req.ToolChoice}}
 	}
 	for _, mod := range req.ResponseModalities {
 		if mod == "audio" {

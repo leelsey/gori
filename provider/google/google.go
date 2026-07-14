@@ -107,10 +107,22 @@ type genConfig struct {
 }
 
 type apiRequest struct {
-	SystemInstruction *apiContent   `json:"systemInstruction,omitempty"`
-	Contents          []apiContent  `json:"contents"`
-	Tools             []apiToolDecl `json:"tools,omitempty"`
-	GenerationConfig  *genConfig    `json:"generationConfig,omitempty"`
+	SystemInstruction *apiContent    `json:"systemInstruction,omitempty"`
+	Contents          []apiContent   `json:"contents"`
+	Tools             []apiToolDecl  `json:"tools,omitempty"`
+	ToolConfig        *apiToolConfig `json:"toolConfig,omitempty"`
+	GenerationConfig  *genConfig     `json:"generationConfig,omitempty"`
+}
+
+// apiToolConfig forces function calling when a specific tool is required
+// (structured-output pattern). Mode "ANY" restricted to AllowedFunctionNames.
+type apiToolConfig struct {
+	FunctionCallingConfig apiFunctionCallingConfig `json:"functionCallingConfig"`
+}
+
+type apiFunctionCallingConfig struct {
+	Mode                 string   `json:"mode"`
+	AllowedFunctionNames []string `json:"allowedFunctionNames,omitempty"`
 }
 
 func buildContents(req gori.Request) []apiContent {
@@ -231,6 +243,12 @@ func (c *Client) buildRequest(req gori.Request) apiRequest {
 			decls = append(decls, apiFunctionDecl{Name: t.Name, Description: t.Description, Parameters: t.Schema})
 		}
 		out.Tools = []apiToolDecl{{FunctionDeclarations: decls}}
+	}
+	if req.ToolChoice != "" {
+		out.ToolConfig = &apiToolConfig{FunctionCallingConfig: apiFunctionCallingConfig{
+			Mode:                 "ANY",
+			AllowedFunctionNames: []string{req.ToolChoice},
+		}}
 	}
 	gc := &genConfig{MaxOutputTokens: req.MaxTokens}
 	if req.Temperature != nil {

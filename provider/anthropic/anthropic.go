@@ -81,6 +81,7 @@ type apiRequest struct {
 	System      string         `json:"system,omitempty"`
 	Messages    []apiMessage   `json:"messages"`
 	Tools       []apiTool      `json:"tools,omitempty"`
+	ToolChoice  any            `json:"tool_choice,omitempty"`
 	Thinking    map[string]any `json:"thinking,omitempty"`
 	Temperature *float64       `json:"temperature,omitempty"`
 	Stream      bool           `json:"stream,omitempty"`
@@ -173,6 +174,9 @@ func (c *Client) buildRequest(req gori.Request, stream bool) apiRequest {
 			schema = json.RawMessage(`{"type":"object"}`)
 		}
 		out.Tools = append(out.Tools, apiTool{Name: t.Name, Description: t.Description, InputSchema: schema})
+	}
+	if req.ToolChoice != "" {
+		out.ToolChoice = map[string]any{"type": "tool", "name": req.ToolChoice}
 	}
 	thinking := req.Thinking.Mode != gori.ThinkingOff
 	if thinking {

@@ -57,7 +57,12 @@ type Request struct {
 	System    string
 	Messages  []Message
 	Tools     []ToolDef
-	MaxTokens int
+	// ToolChoice, when non-empty, forces the model to call the named tool
+	// instead of choosing freely — the structured-output pattern (define one
+	// tool whose schema is the desired shape, force it, read the tool input).
+	// The named tool must appear in Tools. Empty leaves the choice to the model.
+	ToolChoice string
+	MaxTokens  int
 	// Temperature is the sampling temperature. nil means "use the provider
 	// default"; a non-nil pointer (including a pointer to 0) is forwarded so
 	// deterministic decoding can be requested explicitly.
