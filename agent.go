@@ -128,21 +128,25 @@ func (a *Agent) observe(ctx context.Context, resp Response) (Message, bool) {
 		return Message{}, false
 	}
 	results := make([]Content, len(uses))
+	runOne := func(i int, u ToolUse) {
+		a.emit(ctx, "tool", ToolCallEvent{Name: u.Name, ID: u.ID, Input: u.Input})
+		res := a.execTool(ctx, u)
+		results[i] = res
+		a.emit(ctx, "tool_result", ToolResultEvent{Name: res.Name, ID: res.ToolUseID, IsError: res.IsError, Content: res.Content})
+	}
 	if a.ParallelTools && len(uses) > 1 {
 		var wg sync.WaitGroup
 		for i, u := range uses {
 			wg.Add(1)
 			go func(i int, u ToolUse) {
 				defer wg.Done()
-				a.emit(ctx, "tool", u.Name)
-				results[i] = a.execTool(ctx, u)
+				runOne(i, u)
 			}(i, u)
 		}
 		wg.Wait()
 	} else {
 		for i, u := range uses {
-			a.emit(ctx, "tool", u.Name)
-			results[i] = a.execTool(ctx, u)
+			runOne(i, u)
 		}
 	}
 	return Message{Role: RoleTool, Content: results}, true
@@ -218,6 +222,7 @@ func (a *Agent) drive(ctx context.Context, step func(context.Context) (Response,
 		a.TotalUsage.Add(resp.Usage)
 		a.SessionUsage.Add(resp.Usage)
 		a.StepUsage = append(a.StepUsage, resp.Usage)
+		a.emit(ctx, "step", StepEvent{Step: i + 1, StopReason: resp.StopReason, Usage: resp.Usage})
 		a.Session.Append(resp.Message)
 		last = resp.Message
 		a.emit(ctx, "message", resp.Message.Text())

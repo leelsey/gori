@@ -113,7 +113,7 @@ func TestConfigSystemAndThinkOverride(t *testing.T) {
 		t.Fatalf("write config: %v", err)
 	}
 
-	agent, err := buildAgent(p, "", "anthropic", "", "override system", "", "", "", "", nil)
+	agent, err := buildAgent(p, "", "anthropic", "", "override system", "", "", "", "", nil, nil)
 	if err != nil {
 		t.Fatalf("buildAgent: %v", err)
 	}
@@ -124,7 +124,7 @@ func TestConfigSystemAndThinkOverride(t *testing.T) {
 		t.Errorf("Thinking.Mode = %v, want persona's ThinkingAuto", agent.Thinking.Mode)
 	}
 
-	agent, err = buildAgent(p, "", "anthropic", "", "", "", "", "", "", nil)
+	agent, err = buildAgent(p, "", "anthropic", "", "", "", "", "", "", nil, nil)
 	if err != nil {
 		t.Fatalf("buildAgent: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestConfigSystemAndThinkOverride(t *testing.T) {
 		t.Errorf("System = %q, want persona's %q", agent.System, "persona system")
 	}
 
-	agent, err = buildAgent(p, "", "anthropic", "", "", "off", "", "", "", nil)
+	agent, err = buildAgent(p, "", "anthropic", "", "", "off", "", "", "", nil, nil)
 	if err != nil {
 		t.Fatalf("buildAgent: %v", err)
 	}
@@ -140,7 +140,7 @@ func TestConfigSystemAndThinkOverride(t *testing.T) {
 		t.Errorf("Thinking.Mode = %v, want ThinkingOff from explicit --think off", agent.Thinking.Mode)
 	}
 
-	agent, err = buildAgent(p, "", "anthropic", "", "", "budget", "", "", "", nil)
+	agent, err = buildAgent(p, "", "anthropic", "", "", "budget", "", "", "", nil, nil)
 	if err != nil {
 		t.Fatalf("buildAgent: %v", err)
 	}

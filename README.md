@@ -99,6 +99,7 @@ gori --think auto --model claude-sonnet-4-6 "Solve this step by step"
 gori --no-stream --model claude-sonnet-4-6 "..."
 gori --timeout 90s --model claude-sonnet-4-6 "..."   # overall deadline (0: none)
 gori --usage --model claude-sonnet-4-6 "..."         # print token usage to stderr
+gori --debug --model claude-sonnet-4-6 "..."         # dump HTTP traffic (keys redacted)
 gori --version
 
 # Multimodal input (attach files; repeatable)
@@ -111,6 +112,7 @@ gori --provider openai --model gpt-4o-audio-preview --modality audio "Say hello 
 # Interactive terminal session (TUI), and help
 gori tui --config gori.json --agent main    # /usage shows token usage, /help lists commands
 gori tui --usage -m claude-sonnet-4-6       # print usage after each turn
+gori tui --debug -m claude-sonnet-4-6       # wire dump; /debug toggles a per-turn step/tool trace
 gori --help
 ```
 
@@ -288,6 +290,13 @@ Built for long-running embeds and real-world network faults — all standard lib
   `Orchestrator.Usage()` aggregates delegated sub-agent usage; the CLI prints
   it all with `--usage` (TUI: `/usage`); `Bus.Dropped()` surfaces events
   dropped to a slow consumer.
+- **Debugging.** `httpdebug.NewClient(w)` (or `--debug` on the CLI/TUI) dumps
+  every provider HTTP request/response — headers, bodies, live SSE, retries —
+  with credentials redacted; wire it into any provider via `WithHTTPClient`.
+  `Agent.Bus` publishes typed lifecycle events (`StepEvent` with stop reason
+  and usage per provider call, `ToolCallEvent`/`ToolResultEvent` with
+  arguments and results) shown by `--orchestrate`'s event log and the TUI's
+  `/debug` per-turn trace.
 - **History compaction.** `Session.Trim(keepLast)` / `Session.DropBefore(n)` cap
   unbounded conversation growth and token cost.
 

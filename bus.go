@@ -2,12 +2,14 @@ package gori
 
 import (
 	"context"
+	"encoding/json"
 	"sync"
 	"sync/atomic"
 )
 
 // Event is a message published on a Bus. Topic is usually the emitting agent's
-// name; Kind is a lifecycle marker ("start", "message", "tool", "done", "error").
+// name; Kind is a lifecycle marker ("start", "step", "message", "tool",
+// "tool_result", "done", "error").
 type Event struct {
 	Topic string
 	Agent string
@@ -17,6 +19,29 @@ type Event struct {
 	// events; the network bridge sets it on events injected from a remote hub so
 	// they are not echoed back (loop prevention).
 	Origin string
+}
+
+// StepEvent is the Data of a "step" event, one per provider call in a run.
+type StepEvent struct {
+	Step       int
+	StopReason StopReason
+	Usage      Usage
+}
+
+// ToolCallEvent is the Data of a "tool" event, published before execution.
+type ToolCallEvent struct {
+	Name  string
+	ID    string
+	Input json.RawMessage
+}
+
+// ToolResultEvent is the Data of a "tool_result" event, published after
+// execution.
+type ToolResultEvent struct {
+	Name    string
+	ID      string
+	IsError bool
+	Content string
 }
 
 // Bus is a lightweight in-process publish/subscribe hub built on channels. It is

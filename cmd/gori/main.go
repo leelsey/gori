@@ -18,6 +18,7 @@ import (
 
 	"github.com/leelsey/gori"
 	"github.com/leelsey/gori/a2a"
+	"github.com/leelsey/gori/httpdebug"
 	"github.com/leelsey/gori/internal/build"
 	"github.com/leelsey/gori/internal/rpc"
 	"github.com/leelsey/gori/internal/tui"
@@ -100,10 +101,10 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		if len(images) > 0 || len(audios) > 0 || len(bf.modalities) > 0 {
 			fmt.Fprintln(stderr, "gori: warning: --image/--audio/--modality are ignored in --orchestrate mode")
 		}
-		return runOrchestrator(ctx, cfgPath, prompt, *showUsage, stdout, stderr)
+		return runOrchestrator(ctx, cfgPath, prompt, *showUsage, bf.debugClient(stderr), stdout, stderr)
 	}
 
-	agent, err := bf.buildAgent(cfgPath)
+	agent, err := bf.buildAgent(cfgPath, stderr)
 	if err != nil {
 		fmt.Fprintln(stderr, "gori:", err)
 		return 1
@@ -156,6 +157,38 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 // formatUsage renders a Usage as a single human-readable line fragment.
 func formatUsage(u gori.Usage) string { return "tokens: " + u.String() }
 
+// eventDetail renders the typed payload of a Bus event for the --orchestrate
+// event log; unknown payloads add nothing.
+func eventDetail(ev gori.Event) string {
+	switch d := ev.Data.(type) {
+	case gori.StepEvent:
+		return fmt.Sprintf(" %d: %s (%s)", d.Step, d.StopReason, d.Usage)
+	case gori.ToolCallEvent:
+		return " " + d.Name + " " + trunc(string(d.Input), 120)
+	case gori.ToolResultEvent:
+		if d.IsError {
+			return " " + d.Name + " error: " + trunc(d.Content, 200)
+		}
+		return " " + d.Name + " ok"
+	case string:
+		if ev.Kind == "error" {
+			return ": " + trunc(d, 200)
+		}
+	}
+	return ""
+}
+
+func trunc(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	r := []rune(s) // cut on a rune boundary, not mid-character
+	if len(r) <= n {
+		return s
+	}
+	return string(r[:n]) + "…"
+}
+
 // printAgentUsage prints per-step usage (when the run took more than one
 // provider call) followed by the run total.
 func printAgentUsage(w io.Writer, a *gori.Agent) {
@@ -172,6 +205,7 @@ type backendFlags struct {
 	model, provider, cli, baseURL, apiKeyEnv, config, agent, system, think string
 	timeout                                                                time.Duration
 	modalities                                                             stringList
+	debug                                                                  bool
 }
 
 func addBackendFlags(fs *flag.FlagSet) *backendFlags {
@@ -188,7 +222,16 @@ func addBackendFlags(fs *flag.FlagSet) *backendFlags {
 	fs.StringVar(&bf.think, "think", "", "thinking mode: off|auto|budget (default off)")
 	fs.DurationVar(&bf.timeout, "timeout", 0, "overall deadline, e.g. 90s or 2m (0: none)")
 	fs.Var(&bf.modalities, "modality", "request non-text output: audio | image (repeatable)")
+	fs.BoolVar(&bf.debug, "debug", false, "dump provider HTTP traffic to stderr (credentials redacted)")
 	return bf
+}
+
+// debugClient returns an httpdebug-wrapped client when --debug is set, else nil.
+func (bf *backendFlags) debugClient(stderr io.Writer) *http.Client {
+	if !bf.debug {
+		return nil
+	}
+	return httpdebug.NewClient(stderr)
 }
 
 // resolveConfigPath applies auto-discovery and the ignored-flag warning;
@@ -207,8 +250,8 @@ func (bf *backendFlags) resolveConfigPath(stderr io.Writer) string {
 	return cfgPath
 }
 
-func (bf *backendFlags) buildAgent(cfgPath string) (*gori.Agent, error) {
-	return buildAgent(cfgPath, bf.agent, bf.provider, bf.model, bf.system, bf.think, bf.cli, bf.baseURL, bf.apiKeyEnv, bf.modalities)
+func (bf *backendFlags) buildAgent(cfgPath string, stderr io.Writer) (*gori.Agent, error) {
+	return buildAgent(cfgPath, bf.agent, bf.provider, bf.model, bf.system, bf.think, bf.cli, bf.baseURL, bf.apiKeyEnv, bf.modalities, bf.debugClient(stderr))
 }
 
 // runContext returns a ctx cancelled by SIGINT/SIGTERM and, when --timeout is
@@ -252,7 +295,7 @@ func warnIgnoredConfigFlags(stderr io.Writer, cliCmd, providerType, baseURL, api
 	}
 }
 
-func buildAgent(configPath, agentName, providerType, model, system, think, cliCmd, baseURL, apiKeyEnv string, modalities []string) (*gori.Agent, error) {
+func buildAgent(configPath, agentName, providerType, model, system, think, cliCmd, baseURL, apiKeyEnv string, modalities []string, hc *http.Client) (*gori.Agent, error) {
 	if configPath == "" && agentName != "" {
 		return nil, fmt.Errorf("--agent requires a config (pass --config or run where gori.json is discoverable)")
 	}
@@ -268,7 +311,7 @@ func buildAgent(configPath, agentName, providerType, model, system, think, cliCm
 		if name == "" {
 			return nil, fmt.Errorf("--agent required (or set default_agent in config)")
 		}
-		agent, err := build.Agent(cfg, name, gori.NewRegistry())
+		agent, err := build.Agent(cfg, name, gori.NewRegistry(), hc)
 		if err != nil {
 			return nil, err
 		}
@@ -299,7 +342,7 @@ func buildAgent(configPath, agentName, providerType, model, system, think, cliCm
 			Command:   fields[0],
 			Args:      fields[1:],
 			PromptVia: "stdin",
-		})
+		}, hc)
 		if err != nil {
 			return nil, err
 		}
@@ -324,7 +367,7 @@ func buildAgent(configPath, agentName, providerType, model, system, think, cliCm
 		Type:      providerType,
 		APIKeyEnv: keyEnv,
 		BaseURL:   baseURL,
-	})
+	}, hc)
 	if err != nil {
 		return nil, err
 	}
@@ -338,7 +381,7 @@ func buildAgent(configPath, agentName, providerType, model, system, think, cliCm
 	}, nil
 }
 
-func runOrchestrator(ctx context.Context, configPath, prompt string, showUsage bool, stdout, stderr io.Writer) int {
+func runOrchestrator(ctx context.Context, configPath, prompt string, showUsage bool, hc *http.Client, stdout, stderr io.Writer) int {
 	if configPath == "" {
 		fmt.Fprintln(stderr, "gori: --orchestrate requires --config")
 		return 1
@@ -372,12 +415,12 @@ func runOrchestrator(ctx context.Context, configPath, prompt string, showUsage b
 	done := make(chan struct{})
 	go func() {
 		for ev := range events {
-			fmt.Fprintf(stderr, "[%s] %s\n", ev.Agent, ev.Kind)
+			fmt.Fprintf(stderr, "[%s] %s%s\n", ev.Agent, ev.Kind, eventDetail(ev))
 		}
 		close(done)
 	}()
 
-	o, err := build.Orchestrator(cfg, bus, gori.NewRegistry())
+	o, err := build.Orchestrator(cfg, bus, gori.NewRegistry(), hc)
 	if err != nil {
 		bus.Close()
 		<-done
@@ -449,7 +492,7 @@ func runMCPServer(args []string, stderr io.Writer) int {
 			return 1
 		}
 		for _, p := range cfg.Agents {
-			ag, err := build.Agent(cfg, p.Name, gori.NewRegistry())
+			ag, err := build.Agent(cfg, p.Name, gori.NewRegistry(), nil)
 			if err != nil {
 				fmt.Fprintln(stderr, "gori mcp-server:", err)
 				return 1
@@ -504,7 +547,7 @@ func runA2AServe(args []string, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "gori a2a-serve: no agent to expose")
 		return 1
 	}
-	ag, err := build.Agent(cfg, name, gori.NewRegistry())
+	ag, err := build.Agent(cfg, name, gori.NewRegistry(), nil)
 	if err != nil {
 		fmt.Fprintln(stderr, "gori a2a-serve:", err)
 		return 1
@@ -741,7 +784,7 @@ func runTUI(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if !validModalities(bf.modalities, stderr) {
 		return 2
 	}
-	agent, err := bf.buildAgent(cfgPath)
+	agent, err := bf.buildAgent(cfgPath, stderr)
 	if err != nil {
 		fmt.Fprintln(stderr, "gori:", err)
 		return 1
@@ -794,6 +837,7 @@ Flags (run / tui):
   --modality <name>     request non-text output: audio | image (repeatable)
   --no-stream           disable streaming output
   --usage               print token usage to stderr (run: after the run; tui: each turn)
+  --debug               dump provider HTTP traffic to stderr (credentials redacted)
   --orchestrate         multi-agent orchestration from --config
   --timeout <dur>       overall deadline, e.g. 90s or 2m (default: none)
 

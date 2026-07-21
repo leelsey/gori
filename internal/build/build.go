@@ -6,6 +6,7 @@ package build
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"os"
 	"os/exec"
 	"strings"
@@ -53,8 +54,10 @@ func MCPTools(ctx context.Context, cfg *gori.Config) ([]gori.Tool, func(), error
 }
 
 // Provider builds a gori.Provider from a ProviderConfig, reading any API key
-// from the configured environment variable.
-func Provider(pc gori.ProviderConfig) (gori.Provider, error) {
+// from the configured environment variable. A non-nil hc replaces the HTTP
+// client of the HTTP-backed providers (e.g. to inject httpdebug); the cli
+// backend has no HTTP and ignores it.
+func Provider(pc gori.ProviderConfig, hc *http.Client) (gori.Provider, error) {
 	key := ""
 	switch {
 	case pc.APIKeyCmd != "":
@@ -72,17 +75,26 @@ func Provider(pc gori.ProviderConfig) (gori.Provider, error) {
 		if pc.BaseURL != "" {
 			c.WithBaseURL(pc.BaseURL)
 		}
+		if hc != nil {
+			c.WithHTTPClient(hc)
+		}
 		return c, nil
 	case "openai":
 		c := openai.New(key)
 		if pc.BaseURL != "" {
 			c.WithBaseURL(pc.BaseURL)
 		}
+		if hc != nil {
+			c.WithHTTPClient(hc)
+		}
 		return c, nil
 	case "google":
 		c := google.New(key)
 		if pc.BaseURL != "" {
 			c.WithBaseURL(pc.BaseURL)
+		}
+		if hc != nil {
+			c.WithHTTPClient(hc)
 		}
 		return c, nil
 	case "cli":
@@ -161,12 +173,12 @@ func keyFromCmd(cmd string) (string, error) {
 }
 
 // Orchestrator builds a multi-agent Orchestrator from cfg, wiring sub-agents as
-// delegation tools on the main agent.
-func Orchestrator(cfg *gori.Config, bus *gori.Bus, tools *gori.Registry) (*gori.Orchestrator, error) {
+// delegation tools on the main agent. hc is passed through to every provider.
+func Orchestrator(cfg *gori.Config, bus *gori.Bus, tools *gori.Registry, hc *http.Client) (*gori.Orchestrator, error) {
 	o := gori.NewOrchestrator(bus)
 	descriptions := map[string]string{}
 	for _, p := range cfg.Agents {
-		ag, err := Agent(cfg, p.Name, tools)
+		ag, err := Agent(cfg, p.Name, tools, hc)
 		if err != nil {
 			return nil, err
 		}
@@ -199,8 +211,8 @@ func A2ATools(cfg *gori.Config) []gori.Tool {
 }
 
 // Agent builds a gori.Agent for the named persona, wiring its provider and any
-// tools resolved from the supplied registry.
-func Agent(cfg *gori.Config, name string, tools *gori.Registry) (*gori.Agent, error) {
+// tools resolved from the supplied registry. hc is passed to the provider.
+func Agent(cfg *gori.Config, name string, tools *gori.Registry, hc *http.Client) (*gori.Agent, error) {
 	persona, ok := cfg.Agent(name)
 	if !ok {
 		return nil, fmt.Errorf("build: agent %q not defined", name)
@@ -209,7 +221,7 @@ func Agent(cfg *gori.Config, name string, tools *gori.Registry) (*gori.Agent, er
 	if !ok {
 		return nil, fmt.Errorf("build: provider %q not defined", persona.Provider)
 	}
-	prov, err := Provider(pc)
+	prov, err := Provider(pc, hc)
 	if err != nil {
 		return nil, err
 	}

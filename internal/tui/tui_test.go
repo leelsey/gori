@@ -71,3 +71,23 @@ func TestUsageCommand(t *testing.T) {
 		t.Errorf("/reset did not clear usage: %q", s)
 	}
 }
+
+func TestDebugCommand(t *testing.T) {
+	agent := &gori.Agent{Provider: stubProvider{}, Model: "x", Session: gori.NewSession()}
+	in := strings.NewReader("quiet\n/debug\ntraced\n/debug\nquiet2\n/exit\n")
+	var out bytes.Buffer
+
+	if err := Run(context.Background(), agent, in, &out, nil); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	s := out.String()
+	if !strings.Contains(s, "(debug on") || !strings.Contains(s, "(debug off)") {
+		t.Errorf("/debug toggle output missing: %q", s)
+	}
+	if got := strings.Count(s, "(step 1: end_turn — input 3, output 5, total 8)"); got != 1 {
+		t.Errorf("trace lines = %d, want exactly 1 (only the debug-on turn): %q", got, s)
+	}
+	if agent.Bus != nil {
+		t.Errorf("tui left its private bus attached to the agent")
+	}
+}
