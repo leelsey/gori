@@ -340,10 +340,33 @@ type apiResponse struct {
 		} `json:"message"`
 		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
-	Usage struct {
-		PromptTokens     int `json:"prompt_tokens"`
-		CompletionTokens int `json:"completion_tokens"`
-	} `json:"usage"`
+	Usage apiUsage `json:"usage"`
+}
+
+type apiUsage struct {
+	PromptTokens        int `json:"prompt_tokens"`
+	CompletionTokens    int `json:"completion_tokens"`
+	PromptTokensDetails struct {
+		CachedTokens int `json:"cached_tokens"`
+	} `json:"prompt_tokens_details"`
+	CompletionTokensDetails struct {
+		ReasoningTokens int `json:"reasoning_tokens"`
+	} `json:"completion_tokens_details"`
+}
+
+// toUsage normalises: reasoning tokens are billed inside completion_tokens, so
+// they move to ThinkingTokens and out of OutputTokens.
+func (u apiUsage) toUsage() gori.Usage {
+	out := u.CompletionTokens - u.CompletionTokensDetails.ReasoningTokens
+	if out < 0 { // nonconforming compatible server: details exceed the total
+		out = 0
+	}
+	return gori.Usage{
+		InputTokens:     u.PromptTokens,
+		OutputTokens:    out,
+		ThinkingTokens:  u.CompletionTokensDetails.ReasoningTokens,
+		CacheReadTokens: u.PromptTokensDetails.CachedTokens,
+	}
 }
 
 // Complete runs a non-streaming completion.
@@ -386,7 +409,7 @@ func (c *Client) Complete(ctx context.Context, req gori.Request) (gori.Response,
 	return gori.Response{
 		Message:    gori.Message{Role: gori.RoleAssistant, Content: content},
 		StopReason: stopReason(ch.FinishReason),
-		Usage:      gori.Usage{InputTokens: parsed.Usage.PromptTokens, OutputTokens: parsed.Usage.CompletionTokens},
+		Usage:      parsed.Usage.toUsage(),
 	}, nil
 }
 
@@ -436,10 +459,7 @@ func (c *Client) Stream(ctx context.Context, req gori.Request, fn func(gori.Stre
 				} `json:"delta"`
 				FinishReason string `json:"finish_reason"`
 			} `json:"choices"`
-			Usage *struct {
-				PromptTokens     int `json:"prompt_tokens"`
-				CompletionTokens int `json:"completion_tokens"`
-			} `json:"usage"`
+			Usage *apiUsage `json:"usage"`
 			Error *struct {
 				Type    string `json:"type"`
 				Message string `json:"message"`
@@ -452,7 +472,7 @@ func (c *Client) Stream(ctx context.Context, req gori.Request, fn func(gori.Stre
 			return gori.Response{}, fmt.Errorf("openai: stream error: %s: %s", chunk.Error.Type, chunk.Error.Message)
 		}
 		if chunk.Usage != nil {
-			out.Usage = gori.Usage{InputTokens: chunk.Usage.PromptTokens, OutputTokens: chunk.Usage.CompletionTokens}
+			out.Usage = chunk.Usage.toUsage()
 		}
 		if len(chunk.Choices) == 0 {
 			continue

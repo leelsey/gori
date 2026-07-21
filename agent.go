@@ -38,6 +38,12 @@ type Agent struct {
 	// TotalUsage is the cumulative provider usage (input+output+thinking tokens)
 	// summed across the provider calls of the most recent Run/Stream.
 	TotalUsage Usage
+	// SessionUsage accumulates usage across every Run/Stream of this agent;
+	// reset only by Clone.
+	SessionUsage Usage
+	// StepUsage records the usage of each provider call in the most recent
+	// Run/Stream, in order.
+	StepUsage []Usage
 }
 
 func (a *Agent) ensure() {
@@ -66,6 +72,8 @@ func (a *Agent) Clone() *Agent {
 	c := *a
 	c.Session = NewSession()
 	c.TotalUsage = Usage{}
+	c.SessionUsage = Usage{}
+	c.StepUsage = nil
 	if len(a.ResponseModalities) > 0 {
 		c.ResponseModalities = append([]string(nil), a.ResponseModalities...)
 	}
@@ -154,6 +162,7 @@ func (a *Agent) RunMessage(ctx context.Context, msg Message) (Message, error) {
 		return Message{}, err // don't poison the session with an un-answered turn
 	}
 	a.TotalUsage = Usage{}
+	a.StepUsage = nil
 	a.emit(ctx, "start", msg.Text())
 	a.Session.Append(msg)
 	return a.loop(ctx)
@@ -206,9 +215,9 @@ func (a *Agent) drive(ctx context.Context, step func(context.Context) (Response,
 			a.emit(ctx, "error", err.Error())
 			return last, err
 		}
-		a.TotalUsage.InputTokens += resp.Usage.InputTokens
-		a.TotalUsage.OutputTokens += resp.Usage.OutputTokens
-		a.TotalUsage.ThinkingTokens += resp.Usage.ThinkingTokens
+		a.TotalUsage.Add(resp.Usage)
+		a.SessionUsage.Add(resp.Usage)
+		a.StepUsage = append(a.StepUsage, resp.Usage)
 		a.Session.Append(resp.Message)
 		last = resp.Message
 		a.emit(ctx, "message", resp.Message.Text())
@@ -240,6 +249,7 @@ func (a *Agent) StreamMessage(ctx context.Context, msg Message, fn func(StreamEv
 		return Message{}, err // don't poison the session with an un-answered turn
 	}
 	a.TotalUsage = Usage{}
+	a.StepUsage = nil
 	a.emit(ctx, "start", msg.Text())
 	a.Session.Append(msg)
 	return a.streamLoop(ctx, fn)

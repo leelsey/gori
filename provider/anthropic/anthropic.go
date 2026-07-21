@@ -240,8 +240,10 @@ type apiResponse struct {
 	Content    []respBlock `json:"content"`
 	StopReason string      `json:"stop_reason"`
 	Usage      struct {
-		InputTokens  int `json:"input_tokens"`
-		OutputTokens int `json:"output_tokens"`
+		InputTokens              int `json:"input_tokens"`
+		OutputTokens             int `json:"output_tokens"`
+		CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+		CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 	} `json:"usage"`
 }
 
@@ -273,7 +275,13 @@ func (r apiResponse) toResponse() gori.Response {
 	return gori.Response{
 		Message:    gori.Message{Role: gori.RoleAssistant, Content: content},
 		StopReason: stopReason(r.StopReason),
-		Usage:      gori.Usage{InputTokens: r.Usage.InputTokens, OutputTokens: r.Usage.OutputTokens},
+		// input_tokens excludes cached tokens; normalise to the full prompt size.
+		Usage: gori.Usage{
+			InputTokens:      r.Usage.InputTokens + r.Usage.CacheReadInputTokens + r.Usage.CacheCreationInputTokens,
+			OutputTokens:     r.Usage.OutputTokens,
+			CacheReadTokens:  r.Usage.CacheReadInputTokens,
+			CacheWriteTokens: r.Usage.CacheCreationInputTokens,
+		},
 	}
 }
 
@@ -492,12 +500,17 @@ func (c *Client) Stream(ctx context.Context, req gori.Request, fn func(gori.Stre
 			var e struct {
 				Message struct {
 					Usage struct {
-						InputTokens int `json:"input_tokens"`
+						InputTokens              int `json:"input_tokens"`
+						CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+						CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 					} `json:"usage"`
 				} `json:"message"`
 			}
 			if err := json.Unmarshal([]byte(ev.Data), &e); err == nil {
-				out.Usage.InputTokens = e.Message.Usage.InputTokens
+				u := e.Message.Usage
+				out.Usage.InputTokens = u.InputTokens + u.CacheReadInputTokens + u.CacheCreationInputTokens
+				out.Usage.CacheReadTokens = u.CacheReadInputTokens
+				out.Usage.CacheWriteTokens = u.CacheCreationInputTokens
 			}
 		case "message_stop":
 			sawStop = true // terminal frame; assembly happens after the loop

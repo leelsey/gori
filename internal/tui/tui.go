@@ -123,9 +123,13 @@ func command(agent *gori.Agent, line string, out io.Writer, color bool) (stop bo
 		return true
 	case "/reset":
 		agent.Session = gori.NewSession()
+		agent.TotalUsage, agent.SessionUsage, agent.StepUsage = gori.Usage{}, gori.Usage{}, nil
 		fmt.Fprintln(out, paint(color, "2", "(session reset)"))
+	case "/usage":
+		fmt.Fprintln(out, paint(color, "2", "(last run: "+agent.TotalUsage.String()+")"))
+		fmt.Fprintln(out, paint(color, "2", "(session:  "+agent.SessionUsage.String()+")"))
 	case "/help":
-		fmt.Fprintln(out, paint(color, "2", "commands: /reset  /exit  /help"))
+		fmt.Fprintln(out, paint(color, "2", "commands: /usage  /reset  /exit  /help"))
 	default:
 		fmt.Fprintln(out, paint(color, "2", "(unknown command "+strings.Fields(line)[0]+")"))
 	}

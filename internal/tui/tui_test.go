@@ -19,7 +19,11 @@ func (stubProvider) Complete(_ context.Context, req gori.Request) (gori.Response
 func (s stubProvider) Stream(ctx context.Context, req gori.Request, fn func(gori.StreamEvent) error) (gori.Response, error) {
 	last := req.Messages[len(req.Messages)-1].Text()
 	_ = fn(gori.StreamEvent{Type: gori.EventTextDelta, Text: "echo:" + last})
-	return gori.Response{Message: gori.AssistantText("echo:" + last), StopReason: gori.StopEndTurn}, nil
+	return gori.Response{
+		Message:    gori.AssistantText("echo:" + last),
+		StopReason: gori.StopEndTurn,
+		Usage:      gori.Usage{InputTokens: 3, OutputTokens: 5},
+	}, nil
 }
 
 func TestRunInteractive(t *testing.T) {
@@ -45,5 +49,25 @@ func TestRunInteractive(t *testing.T) {
 	}
 	if strings.Contains(s, "\033[") {
 		t.Errorf("ANSI escapes leaked into non-TTY output")
+	}
+}
+
+func TestUsageCommand(t *testing.T) {
+	agent := &gori.Agent{Provider: stubProvider{}, Model: "x", Session: gori.NewSession()}
+	in := strings.NewReader("hello\nworld\n/usage\n/reset\n/usage\n/exit\n")
+	var out bytes.Buffer
+
+	if err := Run(context.Background(), agent, in, &out, nil); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	s := out.String()
+	if !strings.Contains(s, "(last run: input 3, output 5, total 8)") {
+		t.Errorf("/usage last-run line missing: %q", s)
+	}
+	if !strings.Contains(s, "(session:  input 6, output 10, total 16)") {
+		t.Errorf("/usage session line missing: %q", s)
+	}
+	if !strings.Contains(s, "(session:  input 0, output 0, total 0)") {
+		t.Errorf("/reset did not clear usage: %q", s)
 	}
 }

@@ -26,9 +26,7 @@ func NewOrchestrator(bus *Bus) *Orchestrator {
 // addUsage accumulates a delegated sub-agent's token usage.
 func (o *Orchestrator) addUsage(u Usage) {
 	o.mu.Lock()
-	o.usage.InputTokens += u.InputTokens
-	o.usage.OutputTokens += u.OutputTokens
-	o.usage.ThinkingTokens += u.ThinkingTokens
+	o.usage.Add(u)
 	o.mu.Unlock()
 }
 

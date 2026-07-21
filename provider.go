@@ -3,6 +3,7 @@ package gori
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 )
 
 // Provider is an LLM backend. Implementations live under provider/* and adapt a
@@ -53,10 +54,10 @@ type ToolDef struct {
 
 // Request is a neutral completion request. Adapters translate it per provider.
 type Request struct {
-	Model     string
-	System    string
-	Messages  []Message
-	Tools     []ToolDef
+	Model    string
+	System   string
+	Messages []Message
+	Tools    []ToolDef
 	// ToolChoice, when non-empty, forces the model to call the named tool
 	// instead of choosing freely — the structured-output pattern (define one
 	// tool whose schema is the desired shape, force it, read the tool input).
@@ -84,11 +85,41 @@ const (
 	StopOther     StopReason = "other"
 )
 
-// Usage reports token accounting for a completion.
+// Usage reports token accounting for a completion. InputTokens is the full
+// prompt size; CacheReadTokens/CacheWriteTokens are the cached portion of it
+// where the provider reports one, not additional tokens.
 type Usage struct {
-	InputTokens    int
-	OutputTokens   int
-	ThinkingTokens int
+	InputTokens      int
+	OutputTokens     int
+	ThinkingTokens   int
+	CacheReadTokens  int
+	CacheWriteTokens int
+}
+
+// Add accumulates o into u.
+func (u *Usage) Add(o Usage) {
+	u.InputTokens += o.InputTokens
+	u.OutputTokens += o.OutputTokens
+	u.ThinkingTokens += o.ThinkingTokens
+	u.CacheReadTokens += o.CacheReadTokens
+	u.CacheWriteTokens += o.CacheWriteTokens
+}
+
+// Total returns input+output+thinking tokens. Cache tokens are excluded: they
+// are a breakdown of InputTokens.
+func (u Usage) Total() int { return u.InputTokens + u.OutputTokens + u.ThinkingTokens }
+
+// String renders the usage on one line, omitting thinking and cache counts
+// when zero.
+func (u Usage) String() string {
+	s := fmt.Sprintf("input %d, output %d", u.InputTokens, u.OutputTokens)
+	if u.ThinkingTokens > 0 {
+		s += fmt.Sprintf(", thinking %d", u.ThinkingTokens)
+	}
+	if u.CacheReadTokens > 0 || u.CacheWriteTokens > 0 {
+		s += fmt.Sprintf(", cache read %d, cache write %d", u.CacheReadTokens, u.CacheWriteTokens)
+	}
+	return s + fmt.Sprintf(", total %d", u.Total())
 }
 
 // Response is the result of a completion.

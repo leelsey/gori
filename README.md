@@ -98,6 +98,7 @@ gori --config examples/gori.json --agent main "Plan a release"
 gori --think auto --model claude-sonnet-4-6 "Solve this step by step"
 gori --no-stream --model claude-sonnet-4-6 "..."
 gori --timeout 90s --model claude-sonnet-4-6 "..."   # overall deadline (0: none)
+gori --usage --model claude-sonnet-4-6 "..."         # print token usage to stderr
 gori --version
 
 # Multimodal input (attach files; repeatable)
@@ -108,7 +109,8 @@ gori --provider google --model gemini-2.5-flash --audio clip.wav "Transcribe thi
 gori --provider openai --model gpt-4o-audio-preview --modality audio "Say hello aloud"
 
 # Interactive terminal session (TUI), and help
-gori tui --config gori.json --agent main
+gori tui --config gori.json --agent main    # /usage shows token usage, /help lists commands
+gori tui --usage -m claude-sonnet-4-6       # print usage after each turn
 gori --help
 ```
 
@@ -280,8 +282,12 @@ Built for long-running embeds and real-world network faults — all standard lib
 - **Bounded teardown.** `mcp.Client.Close()` kills a child that ignores stdin EOF
   rather than hanging.
 - **Token accounting & observability.** `Agent.TotalUsage` reports cumulative
-  tokens for the last run; `Orchestrator.Usage()` aggregates delegated sub-agent
-  usage; `Bus.Dropped()` surfaces events dropped to a slow consumer.
+  tokens for the last run, `Agent.SessionUsage` across all runs, and
+  `Agent.StepUsage` per provider call; `Usage` carries input/output/thinking
+  plus cache read/write token counts (cached tokens are a breakdown of input).
+  `Orchestrator.Usage()` aggregates delegated sub-agent usage; the CLI prints
+  it all with `--usage` (TUI: `/usage`); `Bus.Dropped()` surfaces events
+  dropped to a slow consumer.
 - **History compaction.** `Session.Trim(keepLast)` / `Session.DropBefore(n)` cap
   unbounded conversation growth and token cost.
 

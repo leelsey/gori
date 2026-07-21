@@ -312,9 +312,10 @@ type apiResponse struct {
 		BlockReason string `json:"blockReason"`
 	} `json:"promptFeedback"`
 	UsageMetadata struct {
-		PromptTokenCount     int `json:"promptTokenCount"`
-		CandidatesTokenCount int `json:"candidatesTokenCount"`
-		ThoughtsTokenCount   int `json:"thoughtsTokenCount"`
+		PromptTokenCount        int `json:"promptTokenCount"`
+		CandidatesTokenCount    int `json:"candidatesTokenCount"`
+		ThoughtsTokenCount      int `json:"thoughtsTokenCount"`
+		CachedContentTokenCount int `json:"cachedContentTokenCount"`
 	} `json:"usageMetadata"`
 }
 
@@ -403,9 +404,10 @@ func (c *Client) Complete(ctx context.Context, req gori.Request) (gori.Response,
 		Message:    gori.Message{Role: gori.RoleAssistant, Content: content},
 		StopReason: finishReason(cand.FinishReason, hasTool),
 		Usage: gori.Usage{
-			InputTokens:    parsed.UsageMetadata.PromptTokenCount,
-			OutputTokens:   parsed.UsageMetadata.CandidatesTokenCount,
-			ThinkingTokens: parsed.UsageMetadata.ThoughtsTokenCount,
+			InputTokens:     parsed.UsageMetadata.PromptTokenCount,
+			OutputTokens:    parsed.UsageMetadata.CandidatesTokenCount,
+			ThinkingTokens:  parsed.UsageMetadata.ThoughtsTokenCount,
+			CacheReadTokens: parsed.UsageMetadata.CachedContentTokenCount,
 		},
 	}, nil
 }
@@ -463,6 +465,9 @@ func (c *Client) Stream(ctx context.Context, req gori.Request, fn func(gori.Stre
 		}
 		if chunk.UsageMetadata.ThoughtsTokenCount > 0 {
 			out.Usage.ThinkingTokens = chunk.UsageMetadata.ThoughtsTokenCount
+		}
+		if chunk.UsageMetadata.CachedContentTokenCount > 0 {
+			out.Usage.CacheReadTokens = chunk.UsageMetadata.CachedContentTokenCount
 		}
 		if len(chunk.Candidates) == 0 {
 			continue

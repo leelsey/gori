@@ -56,6 +56,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	var (
 		noStream    = fs.Bool("no-stream", false, "disable streaming output")
 		orchestrate = fs.Bool("orchestrate", false, "run multi-agent orchestration from --config")
+		showUsage   = fs.Bool("usage", false, "print token usage to stderr after the run")
 	)
 	var images, audios stringList
 	fs.Var(&images, "image", "image file to attach as input (repeatable)")
@@ -99,7 +100,7 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		if len(images) > 0 || len(audios) > 0 || len(bf.modalities) > 0 {
 			fmt.Fprintln(stderr, "gori: warning: --image/--audio/--modality are ignored in --orchestrate mode")
 		}
-		return runOrchestrator(ctx, cfgPath, prompt, stdout, stderr)
+		return runOrchestrator(ctx, cfgPath, prompt, *showUsage, stdout, stderr)
 	}
 
 	agent, err := bf.buildAgent(cfgPath)
@@ -119,10 +120,16 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	if *noStream {
 		msg, err := agent.RunMessage(ctx, userMsg)
 		if err != nil {
+			if *showUsage {
+				printAgentUsage(stderr, agent) // failed runs still billed completed steps
+			}
 			return exitErr(stderr, ctx, err)
 		}
 		fmt.Fprintln(stdout, msg.Text())
 		saveMedia(msg, stderr)
+		if *showUsage {
+			printAgentUsage(stderr, agent)
+		}
 		return 0
 	}
 
@@ -135,13 +142,29 @@ func run(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 		}
 		return nil
 	})
+	fmt.Fprintln(stdout) // terminate the streamed line before anything else prints
+	if *showUsage {
+		printAgentUsage(stderr, agent)
+	}
 	if err != nil {
-		fmt.Fprintln(stdout)
 		return exitErr(stderr, ctx, err)
 	}
-	fmt.Fprintln(stdout)
 	saveMedia(out, stderr)
 	return 0
+}
+
+// formatUsage renders a Usage as a single human-readable line fragment.
+func formatUsage(u gori.Usage) string { return "tokens: " + u.String() }
+
+// printAgentUsage prints per-step usage (when the run took more than one
+// provider call) followed by the run total.
+func printAgentUsage(w io.Writer, a *gori.Agent) {
+	if len(a.StepUsage) > 1 {
+		for i, u := range a.StepUsage {
+			fmt.Fprintf(w, "gori: step %d %s\n", i+1, formatUsage(u))
+		}
+	}
+	fmt.Fprintf(w, "gori: %s\n", formatUsage(a.TotalUsage))
 }
 
 // backendFlags are the provider/agent flags shared by `gori` and `gori tui`.
@@ -315,7 +338,7 @@ func buildAgent(configPath, agentName, providerType, model, system, think, cliCm
 	}, nil
 }
 
-func runOrchestrator(ctx context.Context, configPath, prompt string, stdout, stderr io.Writer) int {
+func runOrchestrator(ctx context.Context, configPath, prompt string, showUsage bool, stdout, stderr io.Writer) int {
 	if configPath == "" {
 		fmt.Fprintln(stderr, "gori: --orchestrate requires --config")
 		return 1
@@ -382,6 +405,14 @@ func runOrchestrator(ctx context.Context, configPath, prompt string, stdout, std
 	}
 
 	out, err := o.Run(ctx, prompt)
+	if showUsage {
+		if main := o.Main(); main != nil {
+			printAgentUsage(stderr, main)
+		}
+		if du := o.Usage(); du != (gori.Usage{}) {
+			fmt.Fprintf(stderr, "gori: delegated %s\n", formatUsage(du))
+		}
+	}
 	bus.Close()
 	<-done
 	if bridgeDone != nil {
@@ -698,6 +729,7 @@ func runTUI(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("gori tui", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	bf := addBackendFlags(fs)
+	showUsage := fs.Bool("usage", false, "print token usage to stderr after each turn")
 	fs.Usage = func() { usage(stderr) }
 	if err := fs.Parse(args); err != nil {
 		if err == flag.ErrHelp {
@@ -717,7 +749,13 @@ func runTUI(args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	ctx, stop := bf.runContext()
 	defer stop()
 	// Ctrl-C and --timeout expiry are expected session endings, not failures.
-	switch err := tui.Run(ctx, agent, stdin, stdout, func(m gori.Message) { saveMedia(m, stderr) }); {
+	onFinal := func(m gori.Message) {
+		saveMedia(m, stderr)
+		if *showUsage {
+			printAgentUsage(stderr, agent)
+		}
+	}
+	switch err := tui.Run(ctx, agent, stdin, stdout, onFinal); {
 	case err == nil || errors.Is(err, context.Canceled):
 	case errors.Is(err, context.DeadlineExceeded):
 		fmt.Fprintln(stderr, "gori: session ended (--timeout reached)")
@@ -755,6 +793,7 @@ Flags (run / tui):
   --audio <file>        attach audio as input (repeatable)
   --modality <name>     request non-text output: audio | image (repeatable)
   --no-stream           disable streaming output
+  --usage               print token usage to stderr (run: after the run; tui: each turn)
   --orchestrate         multi-agent orchestration from --config
   --timeout <dur>       overall deadline, e.g. 90s or 2m (default: none)
 
